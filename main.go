@@ -7,7 +7,11 @@ import (
 )
 
 func main() {
-	startGame()
+	//startGame()
+
+	//Test()
+	//OfficialExample()
+	GilderLabs()
 }
 
 func startGame() {
