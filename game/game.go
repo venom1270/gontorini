@@ -351,6 +351,10 @@ func (s *State) GetCurrentPlayer() int {
 	return s.currentPlayer
 }
 
+func (s *State) GetNumPlayers() int {
+	return s.numPlayers
+}
+
 func IsInArray[T comparable](arr []T, el T) bool {
 	for _, v := range arr {
 		if v == el {

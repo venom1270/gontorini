@@ -8,10 +8,8 @@ import (
 
 func main() {
 	//startGame()
-
-	//Test()
-	//OfficialExample()
-	GilderLabs()
+	InitializeLobbyListTest()
+	OfficialExample()
 }
 
 func startGame() {
