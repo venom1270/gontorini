@@ -17,9 +17,8 @@ type Lobby struct {
 	Watchers    []string
 	NumWatchers int
 
-	wg            sync.WaitGroup // Join waitgroup
-	readyWaitGrup sync.WaitGroup // Join waitgroup
-	// TODO ready waitgroup
+	wg             sync.WaitGroup   // Join waitgroup
+	readyWaitGrup  sync.WaitGroup   // Join waitgroup
 	turnWaitGroups []sync.WaitGroup // Game, turn waitgroup
 }
 
