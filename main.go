@@ -9,7 +9,7 @@ import (
 func main() {
 	//startGame()
 	InitializeLobbyListTest()
-	OfficialExample()
+	StartServer()
 }
 
 func startGame() {

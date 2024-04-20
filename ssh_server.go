@@ -1,38 +1,16 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
-	"strings"
 	"sync"
 
-	"github.com/venom1270/santorini/customerrors"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/terminal"
 )
 
-type SessionState int
-
-const (
-	STATE_NAVIGATION = iota
-	STATE_LOBBY_WAITING
-	STATE_LOBBY_READY_WAIT
-	STATE_LOBBY_READY
-	STATE_LOBBY_WAITING_INPUT
-	STATE_LOBBY_WAITING_PLAYERS
-)
-
-type ConnSession struct {
-	ClientId string
-	conn     net.Conn
-	State    SessionState
-	Lobby    *Lobby
-}
-
-func OfficialExample() {
+func StartServer() {
 	log.Println("Starting server!!!")
 
 	authorizedKeysBytes, err := os.ReadFile("server/keys/id_rsa.pub")
@@ -167,123 +145,11 @@ func handleConnection(nConn *net.Conn, config *ssh.ServerConfig) {
 			wg.Done()
 		}(requests)
 
-		clientId := conn.User() + "#" + conn.RemoteAddr().String()
-		connSession := ConnSession{clientId, *nConn, STATE_NAVIGATION, nil}
+		clientId := conn.User() //+ "#" + conn.RemoteAddr().String()
+		connSession := ConnSession{clientId, *nConn, STATE_NAVIGATION, nil, -1}
 
 		handleTerminal(&channel, connSession, &wg)
 
 	}
 
 }
-
-func handleTerminal(channel *ssh.Channel, connSession ConnSession, wg *sync.WaitGroup) {
-
-	log.Println("Opening terminal...")
-	log.Printf("ClientId: %s", connSession.ClientId)
-	term := terminal.NewTerminal(*channel, "> ")
-
-	wg.Add(1)
-	go func() {
-		defer func() {
-			(*channel).Close()
-			wg.Done()
-		}()
-
-		welcome, _ := handleInput("welcome", &connSession)
-		term.Write([]byte(welcome))
-
-		for {
-
-			if connSession.Lobby == nil {
-				// In menu navigation
-
-				line, err := term.ReadLine()
-				if err != nil {
-					log.Printf("Error, closing stream: %v", err)
-					break
-				}
-
-				out, err := handleInput(line, &connSession)
-				if err != nil {
-					if _, ok := err.(customerrors.InfoError); ok {
-						log.Printf("Error handling input, InfoError: %v", err)
-						out = err.Error()
-					} else {
-						log.Printf("Error handling input, closing stream: %v", err)
-						break
-					}
-				}
-				term.Write([]byte(out))
-				term.Write([]byte("\n"))
-			} else {
-				// In lobby (game)
-
-				switch connSession.State {
-				default:
-					term.Write([]byte("Not implemented....... fin"))
-				case STATE_LOBBY_WAITING:
-					term.Write([]byte("Waiting in lobby...\n"))
-					connSession.Lobby.wg.Done()
-					connSession.Lobby.wg.Wait()
-					connSession.State = STATE_LOBBY_READY_WAIT
-				case STATE_LOBBY_READY_WAIT:
-					term.Write([]byte("All players joined, press any button to ready up!"))
-					line, _ := term.ReadLine()
-					fmt.Printf(line) // Just so I don't get an error
-					term.Write([]byte("READY! Waiting other players TODO..."))
-					connSession.State = STATE_NAVIGATION
-					connSession.Lobby = nil
-				}
-
-			}
-
-		}
-	}()
-}
-
-func handleInput(input string, session *ConnSession) (string, error) {
-	switch {
-	default:
-		return fmt.Sprintf("Unrecognized command: '%s'", input), nil
-	case input == "exit":
-		return "", errors.New("client sent 'exit' command")
-	case input == "help":
-		return HELP_STRING, nil
-	case input == "welcome":
-		return fmt.Sprintf(WELCOME_STRING, session.ClientId), nil
-
-	case input == "list":
-		return LobbyListStr(), nil
-	case strings.HasPrefix(input, "joinw ") && strings.Count(input, " ") == 1 && len(input) > 6:
-		_, err := LobbyJoin(session, strings.Split(input, " ")[1], true)
-		if err != nil {
-			return "", err
-		}
-		return "Lobby joined as watcher!", nil
-	case strings.HasPrefix(input, "join ") && strings.Count(input, " ") == 1 && len(input) > 5:
-		_, err := LobbyJoin(session, strings.Split(input, " ")[1], false)
-		if err != nil {
-			return "", err
-		}
-		return "Lobby joined as player!", nil
-	}
-}
-
-const WELCOME_STRING = `
-*** Welcome to simple Gontorini server! ***
-
-It allows hosting and playing simple Gontorini (some refer to it as Santorini) simply over SSH!
-Type 'help' for more info on how to interact with this terminal.
-You can type when you see the '>' symbol.
-
-Your id: %s
-
-`
-
-const HELP_STRING = `
-You can use these commands to navigate:
- - 'exit' to quit the session
- - 'list' to show currently open lobbies
- - 'join <lobbyId>' to join a lobby
- - 'joinw <lobbyId>' to join as a watcher
-`

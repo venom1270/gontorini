@@ -4,6 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
+
+	"github.com/venom1270/santorini/customerrors"
 )
 
 // Board: 0 (empty) -> 1 (lvl1) -> 2 (lvl2) -> 3 (lvl3) -> 4 (lvl4) -> capped)
@@ -145,53 +149,58 @@ func (s *State) isFieldEmpty(pos Position) bool {
 }
 
 func (s *State) PrintState() {
-	fmt.Println("Board")
-	fmt.Print("\n \t")
+	fmt.Println(s.GetStateStr())
+}
+
+func (s *State) GetStateStr() string {
+	sb := strings.Builder{}
+	sb.WriteString("Board\n")
+	sb.WriteString("\n \t")
 	for i := 0; i < 5; i++ {
-		fmt.Print(i)
-		fmt.Print(" ")
+		sb.WriteString(strconv.Itoa(i))
+		sb.WriteString(" ")
 	}
-	fmt.Println()
-	fmt.Println()
+	sb.WriteString("\n\n")
 	for i := 0; i < 5; i++ {
-		fmt.Print(i)
-		fmt.Print("\t")
+		sb.WriteString(strconv.Itoa(i))
+		sb.WriteString("\t")
 		for j := 0; j < 5; j++ {
-			fmt.Print(s.board[i*5+j])
-			fmt.Print(" ")
+			sb.WriteString(strconv.Itoa(s.board[i*5+j]))
+			sb.WriteString(" ")
 		}
-		fmt.Println()
+		sb.WriteString("\n")
 	}
-	fmt.Println("\nWorkers")
+	sb.WriteString("\nWorkers\n")
 
 	for i := 0; i < 5; i++ {
-		//fmt.Print(i)
-		fmt.Print("\t")
+		sb.WriteString("\t")
 		for j := 0; j < 5; j++ {
 			_, index := s.getBoardLocation(Position{i, j})
 			for p := 0; p < s.numPlayers*2; p++ {
 				if s.PlayerPositions[p] == index {
-					fmt.Print(p + 1)
-					fmt.Print(" ")
+					sb.WriteString(strconv.Itoa(p + 1))
+					sb.WriteString(" ")
 					index = -1
 					break
 				}
 			}
 			if index != -1 {
-				fmt.Print(". ")
+				sb.WriteString(". ")
 			}
 		}
-		fmt.Println()
+		sb.WriteString("\n")
 	}
 
-	fmt.Println()
+	sb.WriteString("\n")
 
 	for i := 0; i < s.numPlayers; i++ {
 		var worker1Pos = getBoardCoordianates(s.PlayerPositions[i*2])
 		var worker2Pos = getBoardCoordianates(s.PlayerPositions[i*2+1])
-		fmt.Printf(" Player %d, worker %d: %v (%d)\n", i+1, 1, worker1Pos, s.PlayerPositions[i*2])
-		fmt.Printf(" Player %d, worker %d: %v (%d)\n", i+1, 2, worker2Pos, s.PlayerPositions[i*2+1])
+		sb.WriteString(fmt.Sprintf(" Player %d, worker %d: %v (%d)\n", i+1, 1, worker1Pos, s.PlayerPositions[i*2]))
+		sb.WriteString(fmt.Sprintf(" Player %d, worker %d: %v (%d)\n", i+1, 2, worker2Pos, s.PlayerPositions[i*2+1]))
 	}
+
+	return sb.String()
 }
 
 func (s *State) CheckGameOver() (int, error) {
@@ -304,10 +313,10 @@ func (s *State) GetValidBuildLocations(player, worker int) ([]Position, error) {
 
 func (s *State) MoveWorker(player, worker int, pos Position) (bool, error) {
 	if player != s.currentPlayer {
-		return false, errors.New("invalid player")
+		return false, customerrors.NewInfoError("invalid player")
 	}
 	if !s.isValidPosition(pos) {
-		return false, errors.New("invalid position")
+		return false, customerrors.NewInfoError("invalid position")
 	}
 
 	var validPositons, err = s.GetValidMoveLocations(player, worker)
@@ -315,7 +324,7 @@ func (s *State) MoveWorker(player, worker int, pos Position) (bool, error) {
 		return false, err
 	}
 	if !IsInArray(validPositons, pos) {
-		return false, nil
+		return false, customerrors.NewInfoError("that is not a valid position")
 	}
 
 	s.SetWorkerPosition(player, worker, pos)
@@ -325,10 +334,10 @@ func (s *State) MoveWorker(player, worker int, pos Position) (bool, error) {
 
 func (s *State) Build(player, worker int, pos Position) (bool, error) {
 	if player != s.currentPlayer {
-		return false, errors.New("invalid player, not current")
+		return false, customerrors.NewInfoError("invalid player, not current")
 	}
 	if !s.isValidPosition(pos) {
-		return false, errors.New("invalid position")
+		return false, customerrors.NewInfoError("invalid position")
 	}
 
 	var validPositons, err = s.GetValidBuildLocations(player, worker)
@@ -336,7 +345,7 @@ func (s *State) Build(player, worker int, pos Position) (bool, error) {
 		return false, err
 	}
 	if !IsInArray(validPositons, pos) {
-		return false, nil
+		return false, customerrors.NewInfoError("invalid build position")
 	}
 
 	_, index := s.getBoardLocation(pos)
@@ -344,6 +353,23 @@ func (s *State) Build(player, worker int, pos Position) (bool, error) {
 	s.board[index]++
 	// Next player turn
 	s.currentPlayer = (s.currentPlayer + 1) % s.numPlayers
+	return true, nil
+}
+
+func (s *State) MoveWorkerAndBuild(player, worker int, movePos Position, buildPos Position) (bool, error) {
+	oldWorkerPosition, err := s.GetWorkerPosition(player, worker)
+	if err != nil {
+		return false, err
+	}
+	success, err := s.MoveWorker(player, worker, movePos)
+	if err != nil || !success {
+		return false, err
+	}
+	success, err = s.Build(player, worker, buildPos)
+	if err != nil || !success {
+		s.SetWorkerPosition(player, worker, getBoardCoordianates(oldWorkerPosition))
+		return false, err
+	}
 	return true, nil
 }
 
