@@ -17,8 +17,9 @@ type Lobby struct {
 	Watchers    []string
 	NumWatchers int
 
+	watcherWg      sync.WaitGroup   // Watcher waitgroup
 	wg             sync.WaitGroup   // Join waitgroup
-	readyWaitGrup  sync.WaitGroup   // Join waitgroup
+	readyWaitGrup  sync.WaitGroup   // Ready all waitgroup
 	turnWaitGroups []sync.WaitGroup // Game, turn waitgroup
 }
 
@@ -28,18 +29,13 @@ var lobbyList []Lobby
 
 func InitializeLobbyListTest() {
 	lobbyList = []Lobby{
-		{*game.NewState(), "Lobby1", make([]string, 2), 0, make([]string, 10), 5, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, 2)},
-		{*game.NewState(), "Lobby2", make([]string, 2), 0, make([]string, 10), 0, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, 2)},
-		{*game.NewState(), "Lobby3", make([]string, 2), 0, make([]string, 10), 0, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, 2)},
+		{*game.NewState(2), "Lobby1", make([]string, 2), 0, make([]string, 10), 5, sync.WaitGroup{}, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, 2)},
+		{*game.NewState(2), "Lobby2", make([]string, 2), 0, make([]string, 10), 0, sync.WaitGroup{}, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, 2)},
+		{*game.NewState(2), "Lobby3", make([]string, 2), 0, make([]string, 10), 0, sync.WaitGroup{}, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, 2)},
 	}
 
 	for i := 0; i < len(lobbyList); i++ {
-		lobbyList[i].GameState.SetupQuick() // TODO: currently only a simple 2 player game with preset workers
-		lobbyList[i].wg.Add(lobbyList[i].GameState.GetNumPlayers())
-		lobbyList[i].readyWaitGrup.Add(lobbyList[i].GameState.GetNumPlayers())
-		for j := 0; j < len(lobbyList[i].turnWaitGroups); j++ {
-			lobbyList[i].turnWaitGroups[j].Add(j)
-		}
+		initLobby(i)
 	}
 }
 
@@ -57,7 +53,7 @@ func LobbyJoin(connSession *ConnSession, lobbyId string, watcher bool) (*Lobby, 
 
 	fmt.Println(lobbyList)
 
-	lobby, err := findLobby(lobbyId)
+	lobby, _, err := findLobby(lobbyId)
 	if err != nil {
 		return &Lobby{}, err
 	}
@@ -83,6 +79,7 @@ func LobbyJoin(connSession *ConnSession, lobbyId string, watcher bool) (*Lobby, 
 		}
 		lobby.Watchers[lobby.NumWatchers] = connSession.ClientId
 		lobby.NumWatchers++
+		connSession.PlayerIndex = WATCHER
 	}
 
 	connSession.State = STATE_LOBBY_WAITING
@@ -91,13 +88,45 @@ func LobbyJoin(connSession *ConnSession, lobbyId string, watcher bool) (*Lobby, 
 	return lobby, nil
 }
 
-func findLobby(lobbyId string) (*Lobby, error) {
+func LobbyCreate(connSession *ConnSession, lobbyId string, numPlayers int) error {
+	if numPlayers < 2 || numPlayers > 4 {
+		return customerrors.NewInfoError("number of players must be 2-4")
+	}
+	_, index, _ := findLobby(lobbyId)
+	if index >= 0 {
+		return customerrors.NewInfoError("lobby already exists")
+	}
+	lobbyList = append(lobbyList, Lobby{*game.NewState(numPlayers), lobbyId, make([]string, numPlayers), 0, make([]string, 10), 0, sync.WaitGroup{}, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, numPlayers)})
+
+	initLobby(len(lobbyList) - 1)
+
+	return nil
+}
+
+func initLobby(i int) {
+	lobbyList[i].GameState.SetupQuick() // TODO: currently only a simple 2 player game with preset workers
+	lobbyList[i].wg.Add(lobbyList[i].GameState.GetNumPlayers())
+	lobbyList[i].readyWaitGrup.Add(lobbyList[i].GameState.GetNumPlayers())
+	for j := 0; j < len(lobbyList[i].turnWaitGroups); j++ {
+		lobbyList[i].turnWaitGroups[j].Add(j)
+	}
+}
+
+func LobbyClose(lobbyId string) {
+	_, index, err := findLobby(lobbyId)
+	if err != nil {
+		return
+	}
+	lobbyList = append(lobbyList[:index], lobbyList[index+1:]...)
+}
+
+func findLobby(lobbyId string) (*Lobby, int, error) {
 	//for _, lobby := range lobbyList { IM LEAVING THIS GOOF HERE FOR FUTURE ME TO LAUGH AT MYSELF
 	for i := 0; i < len(lobbyList); i++ {
 		lobby := &lobbyList[i]
 		if lobby.LobbyId == lobbyId {
-			return lobby, nil
+			return lobby, i, nil
 		}
 	}
-	return &Lobby{}, customerrors.NewInfoError("invalid lobby")
+	return &Lobby{}, -1, customerrors.NewInfoError("invalid lobby")
 }

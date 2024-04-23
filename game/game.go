@@ -24,6 +24,7 @@ type State struct {
 	PlayerPositions [8]int // We might not need this, optimization only
 	numPlayers      int
 	currentPlayer   int
+	Victor          int
 }
 
 type Position struct {
@@ -39,10 +40,10 @@ func (s *State) SetPlayers(players int) bool {
 	}
 }
 
-func NewState() *State {
+func NewState(numPlayers int) *State {
 	var state = State{}
 	state.currentPlayer = 0
-	state.numPlayers = 2
+	state.numPlayers = numPlayers
 	for i := 0; i < 8; i++ {
 		state.PlayerPositions[i] = -100
 	}
@@ -50,6 +51,7 @@ func NewState() *State {
 }
 
 func (s *State) Setup() {
+	s.Victor = -1
 	s.PlacePlayers()
 	fmt.Println("Setup complete!")
 }
@@ -63,6 +65,7 @@ func (s *State) SetupQuick() {
 	s.board[0] = LVL3
 	s.board[6] = LVL2
 	s.currentPlayer = 0
+	s.Victor = -1
 	fmt.Println("Quick setup done!")
 }
 
@@ -351,8 +354,7 @@ func (s *State) Build(player, worker int, pos Position) (bool, error) {
 	_, index := s.getBoardLocation(pos)
 	// Build
 	s.board[index]++
-	// Next player turn
-	s.currentPlayer = (s.currentPlayer + 1) % s.numPlayers
+
 	return true, nil
 }
 
@@ -370,6 +372,14 @@ func (s *State) MoveWorkerAndBuild(player, worker int, movePos Position, buildPo
 		s.SetWorkerPosition(player, worker, getBoardCoordianates(oldWorkerPosition))
 		return false, err
 	}
+
+	s.Victor, _ = s.CheckGameOver()
+
+	if s.Victor == -1 {
+		// Next player turn
+		s.currentPlayer = (s.currentPlayer + 1) % s.numPlayers
+	}
+
 	return true, nil
 }
 

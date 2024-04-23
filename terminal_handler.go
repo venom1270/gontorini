@@ -18,6 +18,9 @@ import (
 
 type SessionState int
 
+// Just an identifier cuz no enums good
+const WATCHER = 555
+
 const (
 	STATE_NAVIGATION = iota
 	STATE_LOBBY_WAITING
@@ -72,13 +75,16 @@ func handleTerminal(channel *ssh.Channel, connSession ConnSession, wg *sync.Wait
 
 		for {
 
-			if connSession.Lobby == nil {
+			switch connSession.State {
+			default:
+				term.Write([]byte("Not implemented....... fin\n"))
+			case STATE_NAVIGATION:
 				// In menu navigation
 
 				line, err := term.ReadLine()
 				if err != nil {
 					log.Printf("Error, closing stream: %v", err)
-					break
+					return // TODO: if I do this then the final printline does not exexute
 				}
 
 				out, err := handleInput(line, &connSession)
@@ -90,68 +96,105 @@ func handleTerminal(channel *ssh.Channel, connSession ConnSession, wg *sync.Wait
 				}
 				term.Write([]byte(out))
 				term.Write([]byte("\n"))
-			} else {
-				// In lobby (game)
 
-				switch connSession.State {
-				default:
-					term.Write([]byte("Not implemented....... fin\n"))
-				case STATE_LOBBY_WAITING:
+			case STATE_LOBBY_WAITING:
+				if connSession.PlayerIndex == WATCHER {
+					term.Write([]byte("Waiting for players to join and game to begin...\n"))
+					connSession.Lobby.readyWaitGrup.Wait()
+					connSession.State = STATE_LOBBY_PLAYING // TODO: set this on Lobby maybe??
+				} else {
+					// Player
 					term.Write([]byte("Waiting in lobby...\n"))
 					connSession.Lobby.wg.Done()
 					connSession.Lobby.wg.Wait()
 					connSession.State = STATE_LOBBY_READY_WAIT
-				case STATE_LOBBY_READY_WAIT:
-					term.Write([]byte("All players joined, press any button to ready up!\n"))
-					_, err := term.ReadLine()
+				}
+
+			case STATE_LOBBY_READY_WAIT:
+				term.Write([]byte("All players joined, press any button to ready up!\n"))
+				_, err := term.ReadLine()
+				if err != nil {
 					var out = handleError(err)
+					if out == "EXIT" {
+						return
+					}
+				}
+				connSession.Lobby.readyWaitGrup.Done()
+				term.Write([]byte("READY! Waiting other players...\n"))
+				connSession.Lobby.readyWaitGrup.Wait()
+				connSession.State = STATE_LOBBY_PLAYING
+
+				//case STATE_LOBBY_READY:
+			//	term.ReadLine()
+
+			case STATE_LOBBY_PLAYING:
+				// Simple 2 player game with preset worker locations, TODO more players
+				gameStr := connSession.Lobby.GameState.GetStateStr()
+				myIndex := connSession.PlayerIndex
+				currentPlayer := connSession.Lobby.GameState.GetCurrentPlayer()
+				term.Write([]byte(gameStr))
+				if connSession.PlayerIndex == WATCHER {
+					term.Write([]byte(fmt.Sprintf("Player %d turn.\n", currentPlayer+1)))
+					connSession.Lobby.watcherWg.Add(1)
+					connSession.Lobby.watcherWg.Wait()
+
+					if connSession.Lobby.GameState.Victor > -1 {
+						// Somebdoy won
+						gameStr := connSession.Lobby.GameState.GetStateStr()
+						term.Write([]byte(gameStr))
+						term.Write([]byte(fmt.Sprintf("Player %d won the game!\n", connSession.Lobby.GameState.Victor+1)))
+						connSession.State = STATE_NAVIGATION
+					}
+
+				} else if currentPlayer == connSession.PlayerIndex {
+					term.Write([]byte("YOUR TURN!\n"))
+					worker, movePos, buildPos, err := readMoveWorkerInput(term)
 					if err != nil {
+						var out = handleError(err)
 						if out == "EXIT" {
 							return
+						} else {
+							term.Write([]byte(fmt.Sprintf("Error reading input: %v\n", err)))
+							break
 						}
 					}
-					connSession.Lobby.readyWaitGrup.Done()
-					term.Write([]byte("READY! Waiting other players...\n"))
-					connSession.Lobby.readyWaitGrup.Wait()
-					connSession.State = STATE_LOBBY_PLAYING
+					fmt.Println(worker - myIndex*2 - 1)
+					success, err := connSession.Lobby.GameState.MoveWorkerAndBuild(myIndex, worker-myIndex*2-1, movePos, buildPos)
+					if err != nil {
+						term.Write([]byte(fmt.Sprintf("**** Movement error: %v\n", err)))
+						break
+					}
+					if !success {
+						term.Write([]byte("**** Movement unsuccessful, try again\n"))
+						break
+					}
 
-					//case STATE_LOBBY_READY:
-				//	term.ReadLine()
+					completeTurn(&connSession)
 
-				case STATE_LOBBY_PLAYING:
-					// Simple 2 player game with preset worker locations, TODO more players
-					gameStr := connSession.Lobby.GameState.GetStateStr()
-					myIndex := connSession.PlayerIndex
-					term.Write([]byte(gameStr))
-					if connSession.Lobby.GameState.GetCurrentPlayer() == connSession.PlayerIndex {
-						term.Write([]byte("YOUR TURN!\n"))
-						worker, movePos, buildPos, err := readMoveWorkerInput(term)
-						if err != nil {
-							var out = handleError(err)
-							if out == "EXIT" {
-								return
-							} else {
-								term.Write([]byte(fmt.Sprintf("Error reading input: %v\n", err)))
-								break
-							}
+					if connSession.Lobby.GameState.Victor != -1 {
+						connSession.State = STATE_NAVIGATION
+						term.Write([]byte("You won! Gained social score.\n"))
+						if connSession.Lobby.NumWatchers > 0 {
+							fmt.Println(connSession.Lobby.NumWatchers)
+							connSession.Lobby.watcherWg.Done()
 						}
-						fmt.Println(worker - myIndex*2 - 1)
-						success, err := connSession.Lobby.GameState.MoveWorkerAndBuild(myIndex, worker-myIndex*2-1, movePos, buildPos)
-						if err != nil {
-							term.Write([]byte(fmt.Sprintf("**** Movement error: %v\n", err)))
-							break
-						}
-						if !success {
-							term.Write([]byte("**** Movement unsuccessful, try again\n"))
-							break
-						}
-						completeTurn(&connSession)
+						LobbyClose(connSession.Lobby.LobbyId)
 					} else {
-						term.Write([]byte(fmt.Sprintf("Player %d turn...\n", connSession.Lobby.GameState.GetCurrentPlayer()+1)))
-						connSession.Lobby.turnWaitGroups[myIndex].Wait()
+						if connSession.Lobby.NumWatchers > 0 {
+							connSession.Lobby.watcherWg.Done() // This has to be in both branches. LobbyClose messe with the waitgroup
+						}
 					}
 
-					// TODO: GAME END
+				} else {
+					term.Write([]byte(fmt.Sprintf("Player %d turn...\n", currentPlayer+1)))
+					connSession.Lobby.turnWaitGroups[myIndex].Wait()
+
+					if connSession.Lobby.GameState.Victor != -1 {
+						gameStr := connSession.Lobby.GameState.GetStateStr()
+						term.Write([]byte(gameStr))
+						term.Write([]byte(fmt.Sprintf("Sorry, you lost! Player %d won. Social score lost.\n", connSession.Lobby.GameState.Victor+1)))
+						connSession.State = STATE_NAVIGATION
+					}
 				}
 
 			}
@@ -182,49 +225,49 @@ func readMoveWorkerInput(term *term.Terminal) (int, game.Position, game.Position
 	term.Write([]byte(" Select worker: "))
 	line, err := term.ReadLine()
 	if err != nil {
-		return -1, game.Position{}, game.Position{}, err
+		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
 	}
 	worker, err = strconv.Atoi(line)
 	if err != nil {
-		return -1, game.Position{}, game.Position{}, err
+		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
 	}
 	term.Write([]byte(" Move location\n"))
 	term.Write([]byte("  Column: "))
 	line, err = term.ReadLine()
 	if err != nil {
-		return -1, game.Position{}, game.Position{}, err
+		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
 	}
 	movePos.Col, err = strconv.Atoi(line)
 	if err != nil {
-		return -1, game.Position{}, game.Position{}, err
+		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
 	}
 	term.Write([]byte("  Row: "))
 	line, err = term.ReadLine()
 	if err != nil {
-		return -1, game.Position{}, game.Position{}, err
+		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
 	}
 	movePos.Row, err = strconv.Atoi(line)
 	if err != nil {
-		return -1, game.Position{}, game.Position{}, err
+		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
 	}
 	term.Write([]byte(" Build location\n"))
 	term.Write([]byte("  Column: "))
 	line, err = term.ReadLine()
 	if err != nil {
-		return -1, game.Position{}, game.Position{}, err
+		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
 	}
 	buildPos.Col, err = strconv.Atoi(line)
 	if err != nil {
-		return -1, game.Position{}, game.Position{}, err
+		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
 	}
 	term.Write([]byte("  Row: "))
 	line, err = term.ReadLine()
 	if err != nil {
-		return -1, game.Position{}, game.Position{}, err
+		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
 	}
 	buildPos.Row, err = strconv.Atoi(line)
 	if err != nil {
-		return -1, game.Position{}, game.Position{}, err
+		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
 	}
 
 	return worker, movePos, buildPos, nil
@@ -255,11 +298,27 @@ func handleInput(input string, session *ConnSession) (string, error) {
 			return "", err
 		}
 		return "Lobby joined as player!", nil
+
+	case strings.HasPrefix(input, "create ") && strings.Count(input, " ") == 2 && len(input) > 7:
+		lobbyId := strings.Split(input, " ")[1]
+		numPlayers, err := strconv.Atoi(strings.Split(input, " ")[2])
+		if err != nil {
+			return "", err
+		}
+		err = LobbyCreate(session, lobbyId, numPlayers)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Lobby '%s' created!", lobbyId), nil
 	}
 }
 
 func handleError(err error) string {
 	if _, ok := err.(customerrors.InfoError); ok {
+		if err.Error() == "EOF" {
+			log.Printf("Error handling input, closing stream: %v", err)
+			return "EXIT"
+		}
 		log.Printf("Error handling input, InfoError: %v", err)
 		return err.Error()
 	} else {
@@ -285,4 +344,5 @@ You can use these commands to navigate:
  - 'list' to show currently open lobbies
  - 'join <lobbyId>' to join a lobby
  - 'joinw <lobbyId>' to join as a watcher
+ - 'create <lobbyId> <numPlayers [2-4]>' to create a new Lobby
 `
