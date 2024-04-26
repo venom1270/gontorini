@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/venom1270/santorini/customerrors"
 	"github.com/venom1270/santorini/game"
@@ -37,6 +38,11 @@ type ConnSession struct {
 	PlayerIndex int
 }
 
+const (
+	PROMPT_INPUT = "> "
+	PROMPT_WAIT  = ""
+)
+
 var activeSessions []*ConnSession
 
 func findActiveSession(clientId string) *ConnSession {
@@ -61,7 +67,7 @@ func handleTerminal(channel *ssh.Channel, connSession ConnSession, wg *sync.Wait
 
 	log.Println("Opening terminal...")
 	log.Printf("ClientId: %s", connSession.ClientId)
-	term := terminal.NewTerminal(*channel, "> ")
+	term := terminal.NewTerminal(*channel, PROMPT_INPUT)
 
 	wg.Add(1)
 	go func() {
@@ -73,19 +79,44 @@ func handleTerminal(channel *ssh.Channel, connSession ConnSession, wg *sync.Wait
 		welcome, _ := handleInput("welcome", &connSession)
 		term.Write([]byte(welcome))
 
+		// This is an async reading channel - to register inputs while state is waiting
+		c := make(chan string)
+		go func() {
+			for {
+				line, err := term.ReadLine()
+				if err != nil {
+					// out := handleError(err)
+					log.Printf("Error, closing stream: %v", err)
+					(*channel).Close()
+					// TODO: log that session disconnected
+					break
+				}
+
+				select {
+				case c <- line:
+					fmt.Println("Line read!")
+				default:
+					fmt.Println("Line not read")
+				}
+
+			}
+		}()
+
 		for {
 
 			switch connSession.State {
 			default:
 				term.Write([]byte("Not implemented....... fin\n"))
 			case STATE_NAVIGATION:
+				term.SetPrompt(PROMPT_INPUT)
 				// In menu navigation
 
-				line, err := term.ReadLine()
+				/*line, err := term.ReadLine()
 				if err != nil {
 					log.Printf("Error, closing stream: %v", err)
 					return // TODO: if I do this then the final printline does not exexute
-				}
+				}*/
+				line := <-c
 
 				out, err := handleInput(line, &connSession)
 				if err != nil {
@@ -98,6 +129,7 @@ func handleTerminal(channel *ssh.Channel, connSession ConnSession, wg *sync.Wait
 				term.Write([]byte("\n"))
 
 			case STATE_LOBBY_WAITING:
+				term.SetPrompt(PROMPT_WAIT)
 				if connSession.PlayerIndex == WATCHER {
 					term.Write([]byte("Waiting for players to join and game to begin...\n"))
 					connSession.Lobby.readyWaitGrup.Wait()
@@ -111,14 +143,16 @@ func handleTerminal(channel *ssh.Channel, connSession ConnSession, wg *sync.Wait
 				}
 
 			case STATE_LOBBY_READY_WAIT:
+				//term.SetPrompt(PROMPT_INPUT)
 				term.Write([]byte("All players joined, press any button to ready up!\n"))
-				_, err := term.ReadLine()
+				<-c
+				/*_, err := term.ReadLine()
 				if err != nil {
 					var out = handleError(err)
 					if out == "EXIT" {
 						return
 					}
-				}
+				}*/
 				connSession.Lobby.readyWaitGrup.Done()
 				term.Write([]byte("READY! Waiting other players...\n"))
 				connSession.Lobby.readyWaitGrup.Wait()
@@ -128,6 +162,7 @@ func handleTerminal(channel *ssh.Channel, connSession ConnSession, wg *sync.Wait
 			//	term.ReadLine()
 
 			case STATE_LOBBY_PLAYING:
+				term.SetPrompt(PROMPT_WAIT)
 				// Simple 2 player game with preset worker locations, TODO more players
 				gameStr := connSession.Lobby.GameState.GetStateStr()
 				myIndex := connSession.PlayerIndex
@@ -147,8 +182,9 @@ func handleTerminal(channel *ssh.Channel, connSession ConnSession, wg *sync.Wait
 					}
 
 				} else if currentPlayer == connSession.PlayerIndex {
+					term.SetPrompt(PROMPT_INPUT)
 					term.Write([]byte("YOUR TURN!\n"))
-					worker, movePos, buildPos, err := readMoveWorkerInput(term)
+					worker, movePos, buildPos, err := readMoveWorkerInput(term, &c)
 					if err != nil {
 						var out = handleError(err)
 						if out == "EXIT" {
@@ -169,20 +205,20 @@ func handleTerminal(channel *ssh.Channel, connSession ConnSession, wg *sync.Wait
 						break
 					}
 
-					completeTurn(&connSession)
-
 					if connSession.Lobby.GameState.Victor != -1 {
 						connSession.State = STATE_NAVIGATION
-						term.Write([]byte("You won! Gained social score.\n"))
+						term.Write([]byte("You won! Gained social score.\n\n"))
 						if connSession.Lobby.NumWatchers > 0 {
-							fmt.Println(connSession.Lobby.NumWatchers)
+							fmt.Printf("Num watchers: %d\n", connSession.Lobby.NumWatchers)
 							connSession.Lobby.watcherWg.Done()
 						}
-						LobbyClose(connSession.Lobby.LobbyId)
+						completeTurn(&connSession)
+						time.AfterFunc(time.Second*2, func() { LobbyClose(connSession.Lobby.LobbyId) })
 					} else {
 						if connSession.Lobby.NumWatchers > 0 {
 							connSession.Lobby.watcherWg.Done() // This has to be in both branches. LobbyClose messe with the waitgroup
 						}
+						completeTurn(&connSession)
 					}
 
 				} else {
@@ -192,7 +228,8 @@ func handleTerminal(channel *ssh.Channel, connSession ConnSession, wg *sync.Wait
 					if connSession.Lobby.GameState.Victor != -1 {
 						gameStr := connSession.Lobby.GameState.GetStateStr()
 						term.Write([]byte(gameStr))
-						term.Write([]byte(fmt.Sprintf("Sorry, you lost! Player %d won. Social score lost.\n", connSession.Lobby.GameState.Victor+1)))
+						term.Write([]byte(fmt.Sprintf("Sorry, you lost! Player %d won. Social score lost.\n\n", connSession.Lobby.GameState.Victor+1)))
+						term.Write([]byte(PROMPT_INPUT)) // Workaround...
 						connSession.State = STATE_NAVIGATION
 					}
 				}
@@ -217,54 +254,59 @@ func completeTurn(conn *ConnSession) {
 	}
 }
 
-func readMoveWorkerInput(term *term.Terminal) (int, game.Position, game.Position, error) {
+func readMoveWorkerInput(term *term.Terminal, c *chan string) (int, game.Position, game.Position, error) {
 	var worker int
 	var movePos game.Position
 	var buildPos game.Position
 
 	term.Write([]byte(" Select worker: "))
-	line, err := term.ReadLine()
+	/*line, err := term.ReadLine()
 	if err != nil {
 		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
-	}
-	worker, err = strconv.Atoi(line)
+	}*/
+	line := <-*c
+	worker, err := strconv.Atoi(line)
 	if err != nil {
 		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
 	}
 	term.Write([]byte(" Move location\n"))
 	term.Write([]byte("  Column: "))
-	line, err = term.ReadLine()
+	line = <-*c
+	/*line, err = term.ReadLine()
 	if err != nil {
 		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
-	}
+	}*/
 	movePos.Col, err = strconv.Atoi(line)
 	if err != nil {
 		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
 	}
 	term.Write([]byte("  Row: "))
-	line, err = term.ReadLine()
+	line = <-*c
+	/*line, err = term.ReadLine()
 	if err != nil {
 		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
-	}
+	}*/
 	movePos.Row, err = strconv.Atoi(line)
 	if err != nil {
 		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
 	}
 	term.Write([]byte(" Build location\n"))
 	term.Write([]byte("  Column: "))
-	line, err = term.ReadLine()
+	line = <-*c
+	/*line, err = term.ReadLine()
 	if err != nil {
 		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
-	}
+	}*/
 	buildPos.Col, err = strconv.Atoi(line)
 	if err != nil {
 		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
 	}
 	term.Write([]byte("  Row: "))
-	line, err = term.ReadLine()
+	line = <-*c
+	/*line, err = term.ReadLine()
 	if err != nil {
 		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())
-	}
+	}*/
 	buildPos.Row, err = strconv.Atoi(line)
 	if err != nil {
 		return -1, game.Position{}, game.Position{}, customerrors.NewInfoError(err.Error())

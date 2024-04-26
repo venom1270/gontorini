@@ -29,7 +29,7 @@ var lobbyList []Lobby
 
 func InitializeLobbyListTest() {
 	lobbyList = []Lobby{
-		{*game.NewState(2), "Lobby1", make([]string, 2), 0, make([]string, 10), 5, sync.WaitGroup{}, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, 2)},
+		{*game.NewState(2), "Lobby1", make([]string, 2), 0, make([]string, 10), 0, sync.WaitGroup{}, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, 2)},
 		{*game.NewState(2), "Lobby2", make([]string, 2), 0, make([]string, 10), 0, sync.WaitGroup{}, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, 2)},
 		{*game.NewState(2), "Lobby3", make([]string, 2), 0, make([]string, 10), 0, sync.WaitGroup{}, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, 2)},
 	}
