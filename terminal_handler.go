@@ -223,8 +223,9 @@ func handleTerminal(channel *ssh.Channel, connSession ConnSession, wg *sync.Wait
 
 				} else {
 					term.Write([]byte(fmt.Sprintf("Player %d turn...\n", currentPlayer+1)))
-					connSession.Lobby.turnWaitGroups[myIndex].Wait()
-
+					fmt.Printf("player %d current player %d waitgroup %v", connSession.PlayerIndex, connSession.Lobby.GameState.GetCurrentPlayer(), connSession.Lobby.turnWaitGroups[connSession.Lobby.GameState.GetCurrentPlayer()])
+					connSession.Lobby.turnWaitGroups[connSession.Lobby.GameState.GetCurrentPlayer()].Wait()
+					fmt.Printf("%d waitgroup resolved", connSession.PlayerIndex)
 					if connSession.Lobby.GameState.Victor != -1 {
 						gameStr := connSession.Lobby.GameState.GetStateStr()
 						term.Write([]byte(gameStr))
@@ -245,13 +246,25 @@ func handleTerminal(channel *ssh.Channel, connSession ConnSession, wg *sync.Wait
 }
 
 func completeTurn(conn *ConnSession) {
-	for i := 0; i < conn.Lobby.NumPlayers; i++ {
+	/*for i := 0; i < conn.Lobby.NumPlayers; i++ {
 		if i == conn.PlayerIndex {
 			conn.Lobby.turnWaitGroups[i].Add(conn.Lobby.NumPlayers - 1)
 		} else {
 			conn.Lobby.turnWaitGroups[i].Done()
 		}
+	}*/
+	/*conn.Lobby.turnWaitGroups[conn.PlayerIndex].Done()
+	if conn.PlayerIndex == 0 {
+		conn.Lobby.turnWaitGroups[conn.Lobby.NumPlayers-1].Add(1)
+	} else {
+		conn.Lobby.turnWaitGroups[conn.PlayerIndex-1].Add(1)
+	}*/
+	if conn.PlayerIndex == conn.Lobby.NumPlayers-1 {
+		conn.Lobby.turnWaitGroups[0].Add(1)
+	} else {
+		conn.Lobby.turnWaitGroups[conn.PlayerIndex+1].Add(1)
 	}
+	conn.Lobby.turnWaitGroups[conn.PlayerIndex].Done()
 }
 
 func readMoveWorkerInput(term *term.Terminal, c *chan string) (int, game.Position, game.Position, error) {

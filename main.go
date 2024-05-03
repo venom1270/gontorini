@@ -14,7 +14,7 @@ func main() {
 
 func startGame() {
 	var gameState *game.State = game.NewState(2)
-	gameState.SetupQuick()
+	gameState.SetupQuick(true)
 
 	for over, _ := gameState.CheckGameOver(); over == -1; over, _ = gameState.CheckGameOver() {
 		gameState.PrintState()

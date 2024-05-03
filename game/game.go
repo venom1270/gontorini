@@ -1,5 +1,8 @@
 package game
 
+//https://roxley.com/santorini-rulebook
+//https://cdn.1j1ju.com/medias/fc/ec/5d-santorini-rulebook.pdf
+
 import (
 	"errors"
 	"fmt"
@@ -47,6 +50,7 @@ func NewState(numPlayers int) *State {
 	for i := 0; i < 8; i++ {
 		state.PlayerPositions[i] = -100
 	}
+	fmt.Println(numPlayers)
 	return &state
 }
 
@@ -56,14 +60,24 @@ func (s *State) Setup() {
 	fmt.Println("Setup complete!")
 }
 
-func (s *State) SetupQuick() {
-	s.SetPlayers(2)
+func (s *State) SetupQuick(endstate bool) {
+	//s.SetPlayers(2)
 	s.SetWorkerPosition(0, 0, Position{1, 1})
 	s.SetWorkerPosition(0, 1, Position{3, 3})
 	s.SetWorkerPosition(1, 0, Position{3, 1})
 	s.SetWorkerPosition(1, 1, Position{1, 3})
-	s.board[0] = LVL3
-	s.board[6] = LVL2
+	if s.numPlayers > 2 {
+		s.SetWorkerPosition(2, 0, Position{1, 2})
+		s.SetWorkerPosition(2, 1, Position{3, 2})
+	}
+	if s.numPlayers > 3 {
+		s.SetWorkerPosition(3, 0, Position{2, 1})
+		s.SetWorkerPosition(3, 1, Position{2, 4})
+	}
+	if endstate {
+		s.board[0] = LVL3
+		s.board[6] = LVL2
+	}
 	s.currentPlayer = 0
 	s.Victor = -1
 	fmt.Println("Quick setup done!")

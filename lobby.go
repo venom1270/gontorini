@@ -29,7 +29,7 @@ var lobbyList []Lobby
 
 func InitializeLobbyListTest() {
 	lobbyList = []Lobby{
-		{*game.NewState(2), "Lobby1", make([]string, 2), 0, make([]string, 10), 0, sync.WaitGroup{}, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, 2)},
+		{*game.NewState(2), "Test", make([]string, 2), 0, make([]string, 10), 0, sync.WaitGroup{}, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, 2)},
 		{*game.NewState(2), "Lobby2", make([]string, 2), 0, make([]string, 10), 0, sync.WaitGroup{}, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, 2)},
 		{*game.NewState(2), "Lobby3", make([]string, 2), 0, make([]string, 10), 0, sync.WaitGroup{}, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, 2)},
 	}
@@ -96,6 +96,7 @@ func LobbyCreate(connSession *ConnSession, lobbyId string, numPlayers int) error
 	if index >= 0 {
 		return customerrors.NewInfoError("lobby already exists")
 	}
+	fmt.Println(numPlayers)
 	lobbyList = append(lobbyList, Lobby{*game.NewState(numPlayers), lobbyId, make([]string, numPlayers), 0, make([]string, 10), 0, sync.WaitGroup{}, sync.WaitGroup{}, sync.WaitGroup{}, make([]sync.WaitGroup, numPlayers)})
 
 	initLobby(len(lobbyList) - 1)
@@ -104,12 +105,17 @@ func LobbyCreate(connSession *ConnSession, lobbyId string, numPlayers int) error
 }
 
 func initLobby(i int) {
-	lobbyList[i].GameState.SetupQuick() // TODO: currently only a simple 2 player game with preset workers
+	if lobbyList[i].LobbyId == "Test" {
+		lobbyList[i].GameState.SetupQuick(true)
+	} else {
+		lobbyList[i].GameState.SetupQuick(false)
+	}
 	lobbyList[i].wg.Add(lobbyList[i].GameState.GetNumPlayers())
 	lobbyList[i].readyWaitGrup.Add(lobbyList[i].GameState.GetNumPlayers())
-	for j := 0; j < len(lobbyList[i].turnWaitGroups); j++ {
-		lobbyList[i].turnWaitGroups[j].Add(j)
-	}
+	/*for j := 0; j < len(lobbyList[i].turnWaitGroups); j++ {
+		lobbyList[i].turnWaitGroups[j].Add(1)
+	}*/
+	lobbyList[i].turnWaitGroups[0].Add(1)
 }
 
 func LobbyClose(lobbyId string) {
