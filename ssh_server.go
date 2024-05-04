@@ -38,14 +38,17 @@ func StartServer() {
 		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
 			// Should use constant-time compare (or better, salt+hash) in
 			// a production setting.
-			if c.User() == "qwe" && string(pass) == "qwe" {
+			/*if c.User() == "qwe" && string(pass) == "qwe" {
+				return &ssh.Permissions{}, nil
+			}*/
+			if getUser(c.User(), string(pass)) {
 				return &ssh.Permissions{}, nil
 			}
 			return nil, fmt.Errorf("password rejected for %q", c.User())
 		},
 
 		// Remove to disable public key auth.
-		PublicKeyCallback: func(c ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
+		/*PublicKeyCallback: func(c ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
 			if authorizedKeysMap[string(pubKey.Marshal())] {
 				return &ssh.Permissions{
 					// Record the public key used for authentication.
@@ -55,7 +58,7 @@ func StartServer() {
 				}, nil
 			}
 			return nil, fmt.Errorf("unknown public key for %q", c.User())
-		},
+		},*/
 	}
 
 	privateBytes, err := os.ReadFile("server/keys/id_rsa")

@@ -7,7 +7,11 @@ import (
 )
 
 func main() {
+
 	//startGame()
+	createDatabase()
+	getUser("ziga", "qwe")
+	getUser("ziga", "dsfsdfs")
 	InitializeLobbyListTest()
 	StartServer()
 }
