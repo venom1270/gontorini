@@ -8,6 +8,6 @@ App is deployed on fly.io: gontorini.fly.dev:2222
 
 Access the app using your prefered SHH client. CMD example:
 
-    ssh gontorini.fly.io -p 2222 -l qwe
+    ssh gontorini.fly.dev -p 2222 -l qwe
 
 Login is required. Currently hardcoded. Local SQLite database is used.
