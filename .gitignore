@@ -22,3 +22,6 @@ go.work
 
 # DB files
 *.sqlite
+
+# Fly.io
+fly.toml

@@ -75,6 +75,7 @@ func StartServer() {
 	// Once a ServerConfig has been configured, connections can be
 	// accepted.
 	address := "0.0.0.0:2222"
+	// address := "[::1]:8100"
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		log.Fatal("failed to listen for connection: ", err)
